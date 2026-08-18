@@ -34,13 +34,31 @@
         </div>
         <div class="memo-list compact">
           <article v-for="entry in pastTrackEntries" :key="entry.id" class="memo-row">
-            <span class="memo-mood">{{ entry.mood }}</span>
-            <div class="memo-body">
-              <div class="memo-title-row">
-                <p class="memo-note">{{ entry.note || 'No note' }}</p>
-                <span class="memo-time">{{ formatEntryTime(entry.created_at) }}</span>
+            <template v-if="pendingDeleteId === entry.id">
+              <div class="delete-confirm">
+                <p>Delete this memo?</p>
+                <div class="delete-actions">
+                  <button @click="cancelDelete" class="delete-secondary" :disabled="deletingEntryId === entry.id">
+                    Cancel
+                  </button>
+                  <button @click="deleteEntry(entry)" class="delete-danger" :disabled="deletingEntryId === entry.id">
+                    {{ deletingEntryId === entry.id ? 'Deleting...' : 'Delete' }}
+                  </button>
+                </div>
               </div>
-            </div>
+            </template>
+            <template v-else>
+              <span class="memo-mood">{{ entry.mood }}</span>
+              <div class="memo-body">
+                <div class="memo-title-row">
+                  <p class="memo-note">{{ entry.note || 'No note' }}</p>
+                  <span class="memo-time">{{ formatEntryTime(entry.created_at) }}</span>
+                </div>
+              </div>
+              <button @click="requestDelete(entry.id)" class="memo-delete" aria-label="Delete memo">
+                ×
+              </button>
+            </template>
           </article>
         </div>
       </section>
@@ -107,15 +125,33 @@
         </div>
         <div class="memo-list">
           <article v-for="entry in recentEntries" :key="entry.id" class="memo-row">
-            <span class="memo-mood">{{ entry.mood }}</span>
-            <div class="memo-body">
-              <div class="memo-title-row">
-                <p class="memo-track">{{ entry.track_name }}</p>
-                <span class="memo-time">{{ formatEntryTime(entry.created_at) }}</span>
+            <template v-if="pendingDeleteId === entry.id">
+              <div class="delete-confirm">
+                <p>Delete this memo?</p>
+                <div class="delete-actions">
+                  <button @click="cancelDelete" class="delete-secondary" :disabled="deletingEntryId === entry.id">
+                    Cancel
+                  </button>
+                  <button @click="deleteEntry(entry)" class="delete-danger" :disabled="deletingEntryId === entry.id">
+                    {{ deletingEntryId === entry.id ? 'Deleting...' : 'Delete' }}
+                  </button>
+                </div>
               </div>
-              <p class="memo-artist">{{ entry.artist_name }}</p>
-              <p v-if="entry.note" class="memo-note">{{ entry.note }}</p>
-            </div>
+            </template>
+            <template v-else>
+              <span class="memo-mood">{{ entry.mood }}</span>
+              <div class="memo-body">
+                <div class="memo-title-row">
+                  <p class="memo-track">{{ entry.track_name }}</p>
+                  <span class="memo-time">{{ formatEntryTime(entry.created_at) }}</span>
+                </div>
+                <p class="memo-artist">{{ entry.artist_name }}</p>
+                <p v-if="entry.note" class="memo-note">{{ entry.note }}</p>
+              </div>
+              <button @click="requestDelete(entry.id)" class="memo-delete" aria-label="Delete memo">
+                ×
+              </button>
+            </template>
           </article>
         </div>
       </section>
@@ -141,6 +177,8 @@ const pastTrackEntries = ref([]);
 const recentEntries = ref([]);
 const saveStatus = ref('idle');
 const saveMessage = ref('');
+const pendingDeleteId = ref(null);
+const deletingEntryId = ref(null);
 let pollTimer = null;
 let saveMessageTimer = null;
 
@@ -420,6 +458,11 @@ const prependEntry = (entries, entry, limit) => [
   ...entries.filter((item) => item.id !== entry.id),
 ].slice(0, limit);
 
+const removeEntryFromLists = (entryId) => {
+  pastTrackEntries.value = pastTrackEntries.value.filter((entry) => entry.id !== entryId);
+  recentEntries.value = recentEntries.value.filter((entry) => entry.id !== entryId);
+};
+
 const clearSaveMessage = () => {
   if (saveMessageTimer) {
     clearTimeout(saveMessageTimer);
@@ -436,6 +479,46 @@ const showSaveFeedback = (status, message) => {
     saveMessage.value = '';
     saveMessageTimer = null;
   }, status === 'error' ? 4200 : 2200);
+};
+
+const requestDelete = (entryId) => {
+  pendingDeleteId.value = entryId;
+  saveStatus.value = 'idle';
+  saveMessage.value = '';
+};
+
+const cancelDelete = () => {
+  if (!deletingEntryId.value) {
+    pendingDeleteId.value = null;
+  }
+};
+
+const deleteEntry = async (entry) => {
+  if (!userId.value || deletingEntryId.value) {
+    return;
+  }
+
+  deletingEntryId.value = entry.id;
+
+  try {
+    const response = await fetch(apiUrl(`/entries/${entry.id}?user_id=${userId.value}`), {
+      method: 'DELETE',
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.detail || 'Failed to delete memo');
+    }
+
+    removeEntryFromLists(entry.id);
+    pendingDeleteId.value = null;
+    showSaveFeedback('saved', 'Memo deleted.');
+  } catch (error) {
+    showSaveFeedback('error', 'Could not delete memo.');
+    console.error('Failed to delete entry', error);
+  } finally {
+    deletingEntryId.value = null;
+  }
 };
 
 const saveEntry = async () => {
@@ -640,6 +723,7 @@ h1 {
   gap: 12px;
   padding: 12px 0;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
+  min-height: 36px;
 }
 
 .memo-list .memo-row:first-child {
@@ -711,6 +795,90 @@ h1 {
   flex: 0 0 auto;
   font-size: 11px;
   font-weight: 500;
+}
+
+.memo-delete {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.48);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 20px;
+  line-height: 1;
+  padding: 0;
+  transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.memo-delete:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.memo-delete:active {
+  transform: scale(0.94);
+}
+
+.delete-confirm {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 10px 12px;
+}
+
+.delete-confirm p {
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.25;
+  margin: 0;
+}
+
+.delete-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.delete-secondary,
+.delete-danger {
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 8px 11px;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.delete-secondary {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.delete-danger {
+  background: #ff6f61;
+  color: #1c0806;
+}
+
+.delete-secondary:disabled,
+.delete-danger:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.delete-secondary:active:not(:disabled),
+.delete-danger:active:not(:disabled) {
+  transform: scale(0.96);
 }
 
 .mood-grid {

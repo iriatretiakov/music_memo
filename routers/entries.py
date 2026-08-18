@@ -58,3 +58,16 @@ def create_entry(entry: EntryCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_entry)
     return db_entry
+
+@router.delete("/{entry_id}")
+def delete_entry(entry_id: int, user_id: int, db: Session = Depends(get_db)):
+    db_entry = db.query(models.Entry)\
+        .filter(models.Entry.id == entry_id, models.Entry.user_id == user_id)\
+        .first()
+
+    if not db_entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
+
+    db.delete(db_entry)
+    db.commit()
+    return {"status": "deleted", "id": entry_id}
