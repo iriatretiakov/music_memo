@@ -34,12 +34,27 @@
           <button 
             v-for="mood in moods" 
             :key="mood.emoji"
-            @click="selectedMood = mood.emoji"
+            @click="selectPresetMood(mood.emoji)"
             :class="['mood-btn', { active: selectedMood === mood.emoji }]"
           >
             <span class="emoji">{{ mood.emoji }}</span>
             <span class="mood-label">{{ mood.label }}</span>
           </button>
+        </div>
+        <div :class="['custom-mood', { active: isCustomMoodSelected }]">
+          <span class="custom-mood-preview">{{ customMood || '🙂' }}</span>
+          <input
+            v-model="customMood"
+            @input="selectCustomMood"
+            class="custom-mood-input"
+            type="text"
+            maxlength="32"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            aria-label="Custom emoji"
+            placeholder="🙂"
+          />
         </div>
       </section>
 
@@ -73,6 +88,7 @@ import { ref, onMounted, onUnmounted, computed } from 'vue';
 // State
 const currentTrack = ref(null);
 const selectedMood = ref(null);
+const customMood = ref('');
 const note = ref('');
 const isSaving = ref(false);
 const isLoadingTrack = ref(false);
@@ -96,6 +112,35 @@ const moods = [
 ];
 
 const canSave = computed(() => currentTrack.value && selectedMood.value && userId.value);
+const isCustomMoodSelected = computed(() => customMood.value && selectedMood.value === customMood.value);
+
+const emojiPattern = /\p{Extended_Pictographic}|\p{Regional_Indicator}|\p{Emoji_Presentation}|\p{Emoji}\uFE0F/u;
+
+const getGraphemes = (value) => {
+  if (typeof Intl !== 'undefined' && Intl.Segmenter) {
+    return Array.from(
+      new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(value),
+      (item) => item.segment
+    );
+  }
+
+  return Array.from(value);
+};
+
+const firstEmojiFrom = (value) => (
+  getGraphemes(value.trim()).find((segment) => emojiPattern.test(segment)) || ''
+);
+
+const selectPresetMood = (emoji) => {
+  selectedMood.value = emoji;
+  customMood.value = '';
+};
+
+const selectCustomMood = () => {
+  const emoji = firstEmojiFrom(customMood.value);
+  customMood.value = emoji;
+  selectedMood.value = emoji || null;
+};
 
 // API Calls
 const apiUrl = (path) => `${apiBaseUrl}${path.startsWith('/') ? path : `/${path}`}`;
@@ -243,6 +288,7 @@ const saveEntry = async () => {
       // Success feedback
       note.value = '';
       selectedMood.value = null;
+      customMood.value = '';
       alert('Memo saved! Keep listening. 🎵');
     }
   } catch (error) {
@@ -273,8 +319,22 @@ onUnmounted(() => {
 <style scoped>
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700&display=swap');
 
+:global(html),
+:global(body),
+:global(#app) {
+  margin: 0;
+  min-height: 100%;
+  background: #0f0c29;
+}
+
+:global(body) {
+  overflow-x: hidden;
+}
+
 .music-memo-container {
-  min-height: 100vh;
+  min-height: 100dvh;
+  width: 100%;
+  box-sizing: border-box;
   background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
   font-family: 'Outfit', sans-serif;
   display: flex;
@@ -354,7 +414,7 @@ h1 {
   grid-template-columns: repeat(3, 1fr);
   gap: 12px;
   margin-top: 16px;
-  margin-bottom: 32px;
+  margin-bottom: 12px;
 }
 
 .mood-btn {
@@ -388,6 +448,60 @@ h1 {
   font-size: 10px;
   text-transform: uppercase;
   opacity: 0.6;
+}
+
+.custom-mood {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 16px;
+  margin-bottom: 32px;
+  padding: 10px 12px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.custom-mood:focus-within,
+.custom-mood:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.custom-mood.active {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.custom-mood-preview {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.16);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  font-size: 24px;
+}
+
+.custom-mood-input {
+  width: 100%;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  color: white;
+  font-family: inherit;
+  font-size: 22px;
+  line-height: 1;
+  padding: 10px 0;
+}
+
+.custom-mood-input:focus {
+  outline: none;
+}
+
+.custom-mood-input::placeholder {
+  color: rgba(255, 255, 255, 0.4);
 }
 
 textarea {
