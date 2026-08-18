@@ -1,12 +1,25 @@
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import inspect, text
 import models
 from database import engine
 from routers import entries, auth
 
 # Create database tables
 models.Base.metadata.create_all(bind=engine)
+
+def ensure_database_schema():
+    inspector = inspect(engine)
+    if "entries" not in inspector.get_table_names():
+        return
+
+    entry_columns = {column["name"] for column in inspector.get_columns("entries")}
+    if "album_image_url" not in entry_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE entries ADD COLUMN album_image_url VARCHAR"))
+
+ensure_database_schema()
 
 app = FastAPI(title="Music Memo API")
 

@@ -23,6 +23,7 @@ class Entry(Base):
     track_id = Column(String)
     track_name = Column(String)
     artist_name = Column(String)
+    album_image_url = Column(String, nullable=True)
     mood = Column(String)  # For emoji or text
     note = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

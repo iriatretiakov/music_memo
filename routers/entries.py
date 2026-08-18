@@ -15,6 +15,7 @@ class EntryCreate(BaseModel):
     track_id: str
     track_name: str
     artist_name: str
+    album_image_url: Optional[str] = None
     mood: str
     note: Optional[str] = None
 
@@ -51,6 +52,7 @@ def create_entry(entry: EntryCreate, db: Session = Depends(get_db)):
         track_id=entry.track_id,
         track_name=entry.track_name,
         artist_name=entry.artist_name,
+        album_image_url=entry.album_image_url,
         mood=entry.mood,
         note=entry.note
     )

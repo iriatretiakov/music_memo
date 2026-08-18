@@ -10,9 +10,17 @@
       <!-- Current Track Section -->
       <section class="track-section">
         <div v-if="currentTrack" class="track-info animate-in">
-          <p class="label">Currently Playing</p>
-          <h2 class="track-name">{{ currentTrack.track_name }}</h2>
-          <p class="artist-name">{{ currentTrack.artist_name }}</p>
+          <img
+            v-if="currentTrack.album_image_url"
+            :src="currentTrack.album_image_url"
+            alt=""
+            class="track-art"
+          />
+          <div class="track-copy">
+            <p class="label">Currently Playing</p>
+            <h2 class="track-name">{{ currentTrack.track_name }}</h2>
+            <p class="artist-name">{{ currentTrack.artist_name }}</p>
+          </div>
         </div>
         <div v-else-if="authRequired" class="loading-state">
           <p>Connect Spotify to start.</p>
@@ -139,7 +147,17 @@
               </div>
             </template>
             <template v-else>
-              <span class="memo-mood">{{ entry.mood }}</span>
+              <div class="memo-visual">
+                <img
+                  v-if="entry.album_image_url"
+                  :src="entry.album_image_url"
+                  alt=""
+                  class="memo-cover"
+                  loading="lazy"
+                />
+                <span v-else class="memo-mood">{{ entry.mood }}</span>
+                <span v-if="entry.album_image_url" class="memo-mood-badge">{{ entry.mood }}</span>
+              </div>
               <div class="memo-body">
                 <div class="memo-title-row">
                   <p class="memo-track">{{ entry.track_name }}</p>
@@ -540,6 +558,7 @@ const saveEntry = async () => {
         track_id: currentTrack.value.track_id,
         track_name: currentTrack.value.track_name,
         artist_name: currentTrack.value.artist_name,
+        album_image_url: currentTrack.value.album_image_url,
         mood: selectedMood.value,
         note: note.value
       })
@@ -665,12 +684,33 @@ h1 {
   font-size: 28px;
   margin: 0;
   line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 
 .artist-name {
   font-size: 18px;
   opacity: 0.7;
   margin: 8px 0 0 0;
+  overflow-wrap: anywhere;
+}
+
+.track-info {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.track-art {
+  width: 76px;
+  height: 76px;
+  border-radius: 18px;
+  box-shadow: 0 18px 30px rgba(0, 0, 0, 0.28);
+  flex: 0 0 auto;
+  object-fit: cover;
+}
+
+.track-copy {
+  min-width: 0;
 }
 
 .track-memory-section,
@@ -741,6 +781,37 @@ h1 {
   align-items: center;
   justify-content: center;
   font-size: 20px;
+}
+
+.memo-visual {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  position: relative;
+}
+
+.memo-cover {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  display: block;
+  object-fit: cover;
+  box-shadow: 0 10px 18px rgba(0, 0, 0, 0.22);
+}
+
+.memo-mood-badge {
+  min-width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: rgba(15, 12, 41, 0.88);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.22);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
 }
 
 .memo-body {

@@ -18,6 +18,18 @@ SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
 SPOTIFY_REDIRECT_URI = os.getenv("SPOTIFY_REDIRECT_URI")
 FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
 
+def album_image_url(item):
+    images = item.get("album", {}).get("images", [])
+    if not images:
+        return None
+
+    sorted_images = sorted(images, key=lambda image: image.get("width") or 0)
+    preferred_image = next(
+        (image for image in sorted_images if (image.get("width") or 0) >= 300),
+        sorted_images[-1],
+    )
+    return preferred_image.get("url")
+
 def spotify_auth_url():
     if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET or not SPOTIFY_REDIRECT_URI:
         raise HTTPException(status_code=500, detail="Spotify auth is not configured")
@@ -154,4 +166,5 @@ async def get_current_track(user_id: int, db: Session = Depends(get_db)):
             "track_id": item.get("id"),
             "track_name": item.get("name"),
             "artist_name": item.get("artists")[0].get("name") if item.get("artists") else "Unknown",
+            "album_image_url": album_image_url(item),
         }
