@@ -1,0 +1,46 @@
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from pydantic import BaseModel
+from database import get_db
+import models
+from typing import Optional
+
+router = APIRouter(
+    prefix="/entries",
+    tags=["entries"],
+)
+
+class EntryCreate(BaseModel):
+    user_id: int
+    track_id: str
+    track_name: str
+    artist_name: str
+    mood: str
+    note: Optional[str] = None
+
+@router.get("/")
+def read_entries(user_id: int, db: Session = Depends(get_db)):
+    return db.query(models.Entry)\
+        .filter(models.Entry.user_id == user_id)\
+        .order_by(models.Entry.created_at.desc())\
+        .all()
+
+@router.post("/")
+def create_entry(entry: EntryCreate, db: Session = Depends(get_db)):
+    # Verify user exists
+    user = db.query(models.User).filter(models.User.id == entry.user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    db_entry = models.Entry(
+        user_id=entry.user_id,
+        track_id=entry.track_id,
+        track_name=entry.track_name,
+        artist_name=entry.artist_name,
+        mood=entry.mood,
+        note=entry.note
+    )
+    db.add(db_entry)
+    db.commit()
+    db.refresh(db_entry)
+    return db_entry

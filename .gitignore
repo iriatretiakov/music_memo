@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+
+# Environment variables
+.env
+
+# OS files
+.DS_Store
+
+# Databases (if you use SQLite locally)
+*.sqlite3
+*.db
+
+# Docker
+.docker/
+
+# Frontend build output
+frontend/dist/
+frontend/.vite/
+frontend/node_modules/
