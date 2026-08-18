@@ -18,17 +18,7 @@ SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
 SPOTIFY_REDIRECT_URI = os.getenv("SPOTIFY_REDIRECT_URI")
 FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
 
-def frontend_redirect(**params):
-    base_url = FRONTEND_ORIGIN.rstrip("/") or "/"
-    clean_params = {key: value for key, value in params.items() if value is not None}
-    if not clean_params:
-        return RedirectResponse(base_url)
-
-    separator = "&" if "?" in base_url else "?"
-    return RedirectResponse(f"{base_url}{separator}{urllib.parse.urlencode(clean_params)}")
-
-@router.get("/login")
-def login():
+def spotify_auth_url():
     if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET or not SPOTIFY_REDIRECT_URI:
         raise HTTPException(status_code=500, detail="Spotify auth is not configured")
 
@@ -40,8 +30,24 @@ def login():
         "redirect_uri": SPOTIFY_REDIRECT_URI,
     }
     query_params = urllib.parse.urlencode(params)
-    auth_url = f"https://accounts.spotify.com/authorize?{query_params}"
-    return RedirectResponse(auth_url)
+    return f"https://accounts.spotify.com/authorize?{query_params}"
+
+def frontend_redirect(**params):
+    base_url = FRONTEND_ORIGIN.rstrip("/") or "/"
+    clean_params = {key: value for key, value in params.items() if value is not None}
+    if not clean_params:
+        return RedirectResponse(base_url)
+
+    separator = "&" if "?" in base_url else "?"
+    return RedirectResponse(f"{base_url}{separator}{urllib.parse.urlencode(clean_params)}")
+
+@router.get("/login")
+def login():
+    return RedirectResponse(spotify_auth_url())
+
+@router.get("/login-url")
+def login_url():
+    return {"url": spotify_auth_url()}
 
 @router.get("/callback")
 async def callback(

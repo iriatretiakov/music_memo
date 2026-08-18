@@ -8,6 +8,9 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
+      workbox: {
+        navigateFallbackDenylist: [/^\/api(?:\/|$)/]
+      },
       manifest: {
         name: 'Music Memo',
         short_name: 'MusicMemo',

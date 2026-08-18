@@ -154,7 +154,20 @@ const readAuthCallbackParams = () => {
 };
 
 const loginWithSpotify = () => {
-  window.location.href = apiUrl('/auth/login');
+  fetch(apiUrl('/auth/login-url'))
+    .then((response) => {
+      if (!response.ok) {
+        throw new Error('Spotify auth is not configured');
+      }
+      return response.json();
+    })
+    .then((data) => {
+      window.location.href = data.url;
+    })
+    .catch((error) => {
+      authMessage.value = 'Could not start Spotify authorization.';
+      console.error('Failed to start Spotify auth', error);
+    });
 };
 
 const fetchCurrentTrack = async () => {
