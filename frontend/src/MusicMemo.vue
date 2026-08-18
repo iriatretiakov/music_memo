@@ -27,6 +27,24 @@
         </div>
       </section>
 
+      <section v-if="currentTrack && pastTrackEntries.length" class="track-memory-section animate-in">
+        <div class="section-header">
+          <p class="label">Past notes on this track</p>
+          <span class="entry-count">{{ pastTrackEntries.length }}</span>
+        </div>
+        <div class="memo-list compact">
+          <article v-for="entry in pastTrackEntries" :key="entry.id" class="memo-row">
+            <span class="memo-mood">{{ entry.mood }}</span>
+            <div class="memo-body">
+              <div class="memo-title-row">
+                <p class="memo-note">{{ entry.note || 'No note' }}</p>
+                <span class="memo-time">{{ formatEntryTime(entry.created_at) }}</span>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+
       <!-- Mood Selection -->
       <section class="mood-section">
         <p class="label text-center">How does this sound?</p>
@@ -72,12 +90,35 @@
         <button 
           @click="saveEntry" 
           :disabled="!canSave || isSaving"
-          class="save-btn"
+          :class="['save-btn', { saved: saveStatus === 'saved' }]"
         >
-          <span v-if="!isSaving">Save Memo</span>
+          <span v-if="!isSaving">{{ saveButtonLabel }}</span>
           <span v-else class="spinner"></span>
         </button>
+        <p v-if="saveMessage" :class="['save-message', { error: saveStatus === 'error' }]">
+          {{ saveMessage }}
+        </p>
       </footer>
+
+      <section v-if="recentEntries.length" class="feed-section">
+        <div class="section-header">
+          <p class="label">Recent memos</p>
+          <span class="entry-count">{{ recentEntries.length }}</span>
+        </div>
+        <div class="memo-list">
+          <article v-for="entry in recentEntries" :key="entry.id" class="memo-row">
+            <span class="memo-mood">{{ entry.mood }}</span>
+            <div class="memo-body">
+              <div class="memo-title-row">
+                <p class="memo-track">{{ entry.track_name }}</p>
+                <span class="memo-time">{{ formatEntryTime(entry.created_at) }}</span>
+              </div>
+              <p class="memo-artist">{{ entry.artist_name }}</p>
+              <p v-if="entry.note" class="memo-note">{{ entry.note }}</p>
+            </div>
+          </article>
+        </div>
+      </section>
     </div>
   </div>
 </template>
@@ -96,10 +137,17 @@ const authRequired = ref(false);
 const authMessage = ref('');
 const trackMessage = ref("Nothin' spinning right now...");
 const userId = ref(null);
+const pastTrackEntries = ref([]);
+const recentEntries = ref([]);
+const saveStatus = ref('idle');
+const saveMessage = ref('');
 let pollTimer = null;
+let saveMessageTimer = null;
 
 const ACTIVE_TRACK_POLL_MS = 5000;
 const HIDDEN_TRACK_POLL_MS = 30000;
+const RECENT_ENTRIES_LIMIT = 20;
+const TRACK_ENTRIES_LIMIT = 5;
 
 const isPlaying = computed(() => !!currentTrack.value?.track_id);
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
@@ -116,6 +164,7 @@ const moods = [
 
 const canSave = computed(() => currentTrack.value && selectedMood.value && userId.value);
 const isCustomMoodSelected = computed(() => customMood.value && selectedMood.value === customMood.value);
+const saveButtonLabel = computed(() => (saveStatus.value === 'saved' ? 'Saved' : 'Save Memo'));
 
 const emojiPattern = /\p{Extended_Pictographic}|\p{Regional_Indicator}|\p{Emoji_Presentation}|\p{Emoji}\uFE0F/u;
 
@@ -143,6 +192,24 @@ const selectCustomMood = () => {
   const emoji = firstEmojiFrom(customMood.value);
   customMood.value = emoji;
   selectedMood.value = emoji || null;
+};
+
+const formatEntryTime = (value) => {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  const now = new Date();
+  const isToday = date.toDateString() === now.toDateString();
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: isToday ? undefined : 'short',
+    day: isToday ? undefined : 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
 };
 
 // API Calls
@@ -253,13 +320,20 @@ const fetchCurrentTrack = async () => {
     authMessage.value = '';
 
     if (data.track_id) {
+      const previousTrackId = currentTrack.value?.track_id;
       currentTrack.value = data;
+
+      if (data.track_id !== previousTrackId) {
+        fetchTrackEntries(data.track_id);
+      }
     } else {
       currentTrack.value = null;
+      pastTrackEntries.value = [];
       trackMessage.value = data.message || "Nothin' spinning right now...";
     }
   } catch (error) {
     currentTrack.value = null;
+    pastTrackEntries.value = [];
     trackMessage.value = 'Could not reach Music Memo API.';
     console.error('Failed to fetch track', error);
   } finally {
@@ -299,6 +373,71 @@ const handleVisibilityChange = () => {
   }
 };
 
+const fetchRecentEntries = async () => {
+  if (!userId.value) {
+    recentEntries.value = [];
+    return;
+  }
+
+  try {
+    const response = await fetch(apiUrl(`/entries/?user_id=${userId.value}&limit=${RECENT_ENTRIES_LIMIT}`));
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.detail || 'Failed to fetch recent memos');
+    }
+
+    recentEntries.value = data;
+  } catch (error) {
+    console.error('Failed to fetch recent memos', error);
+  }
+};
+
+const fetchTrackEntries = async (trackId = currentTrack.value?.track_id) => {
+  if (!userId.value || !trackId) {
+    pastTrackEntries.value = [];
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      apiUrl(`/entries/track/${encodeURIComponent(trackId)}?user_id=${userId.value}&limit=${TRACK_ENTRIES_LIMIT}`)
+    );
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.detail || 'Failed to fetch track memos');
+    }
+
+    pastTrackEntries.value = data;
+  } catch (error) {
+    console.error('Failed to fetch track memos', error);
+  }
+};
+
+const prependEntry = (entries, entry, limit) => [
+  entry,
+  ...entries.filter((item) => item.id !== entry.id),
+].slice(0, limit);
+
+const clearSaveMessage = () => {
+  if (saveMessageTimer) {
+    clearTimeout(saveMessageTimer);
+    saveMessageTimer = null;
+  }
+};
+
+const showSaveFeedback = (status, message) => {
+  clearSaveMessage();
+  saveStatus.value = status;
+  saveMessage.value = message;
+  saveMessageTimer = setTimeout(() => {
+    saveStatus.value = 'idle';
+    saveMessage.value = '';
+    saveMessageTimer = null;
+  }, status === 'error' ? 4200 : 2200);
+};
+
 const saveEntry = async () => {
   if (!canSave.value) {
     if (!userId.value) {
@@ -322,15 +461,20 @@ const saveEntry = async () => {
         note: note.value
       })
     });
+    const savedEntry = await response.json();
 
-    if (response.ok) {
-      // Success feedback
-      note.value = '';
-      selectedMood.value = null;
-      customMood.value = '';
-      alert('Memo saved! Keep listening. 🎵');
+    if (!response.ok) {
+      throw new Error(savedEntry.detail || 'Failed to save memo');
     }
+
+    note.value = '';
+    selectedMood.value = null;
+    customMood.value = '';
+    pastTrackEntries.value = prependEntry(pastTrackEntries.value, savedEntry, TRACK_ENTRIES_LIMIT);
+    recentEntries.value = prependEntry(recentEntries.value, savedEntry, RECENT_ENTRIES_LIMIT);
+    showSaveFeedback('saved', 'Saved to your memo feed.');
   } catch (error) {
+    showSaveFeedback('error', 'Could not save memo.');
     console.error('Failed to save entry', error);
   } finally {
     isSaving.value = false;
@@ -341,12 +485,14 @@ onMounted(() => {
   readAuthCallbackParams();
   userId.value = userId.value || loadStoredUserId();
   fetchCurrentTrack();
+  fetchRecentEntries();
   scheduleTrackPoll();
   document.addEventListener('visibilitychange', handleVisibilityChange);
 });
 
 onUnmounted(() => {
   clearTrackPoll();
+  clearSaveMessage();
   document.removeEventListener('visibilitychange', handleVisibilityChange);
 });
 </script>
@@ -420,7 +566,7 @@ h1 {
 }
 
 .track-section {
-  margin-bottom: 40px;
+  margin-bottom: 28px;
   min-height: 100px;
 }
 
@@ -442,6 +588,129 @@ h1 {
   font-size: 18px;
   opacity: 0.7;
   margin: 8px 0 0 0;
+}
+
+.track-memory-section,
+.feed-section {
+  margin-bottom: 32px;
+}
+
+.feed-section {
+  margin-top: 32px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.section-header .label {
+  margin: 0;
+}
+
+.entry-count {
+  min-width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.72);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.memo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.memo-list.compact {
+  gap: 8px;
+}
+
+.memo-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.memo-list .memo-row:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.memo-mood {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+}
+
+.memo-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.memo-title-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.memo-track,
+.memo-note,
+.memo-artist,
+.memo-time {
+  margin: 0;
+}
+
+.memo-track {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.memo-artist {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 12px;
+  line-height: 1.35;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+
+.memo-note {
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 13px;
+  line-height: 1.4;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+}
+
+.track-memory-section .memo-note {
+  margin-top: 0;
+}
+
+.memo-time {
+  color: rgba(255, 255, 255, 0.42);
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 500;
 }
 
 .mood-grid {
@@ -579,8 +848,25 @@ textarea:focus {
   cursor: not-allowed;
 }
 
+.save-btn.saved {
+  background: #00ff88;
+  color: #07130a;
+}
+
 .save-btn:active:not(:disabled) {
   transform: scale(0.97);
+}
+
+.save-message {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 10px 0 0;
+  text-align: center;
+}
+
+.save-message.error {
+  color: #ff9a8d;
 }
 
 @keyframes pulse {

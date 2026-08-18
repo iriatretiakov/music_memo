@@ -19,10 +19,24 @@ class EntryCreate(BaseModel):
     note: Optional[str] = None
 
 @router.get("/")
-def read_entries(user_id: int, db: Session = Depends(get_db)):
+def read_entries(user_id: int, limit: int = 20, db: Session = Depends(get_db)):
     return db.query(models.Entry)\
         .filter(models.Entry.user_id == user_id)\
         .order_by(models.Entry.created_at.desc())\
+        .limit(max(1, min(limit, 100)))\
+        .all()
+
+@router.get("/track/{track_id}")
+def read_track_entries(
+    track_id: str,
+    user_id: int,
+    limit: int = 5,
+    db: Session = Depends(get_db)
+):
+    return db.query(models.Entry)\
+        .filter(models.Entry.user_id == user_id, models.Entry.track_id == track_id)\
+        .order_by(models.Entry.created_at.desc())\
+        .limit(max(1, min(limit, 50)))\
         .all()
 
 @router.post("/")
