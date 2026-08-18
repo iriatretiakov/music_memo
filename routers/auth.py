@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 import models
 import urllib.parse
+from typing import Optional
 from spotify import ensure_valid_token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -15,9 +16,22 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
 SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
 SPOTIFY_REDIRECT_URI = os.getenv("SPOTIFY_REDIRECT_URI")
+FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
+
+def frontend_redirect(**params):
+    base_url = FRONTEND_ORIGIN.rstrip("/") or "/"
+    clean_params = {key: value for key, value in params.items() if value is not None}
+    if not clean_params:
+        return RedirectResponse(base_url)
+
+    separator = "&" if "?" in base_url else "?"
+    return RedirectResponse(f"{base_url}{separator}{urllib.parse.urlencode(clean_params)}")
 
 @router.get("/login")
 def login():
+    if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET or not SPOTIFY_REDIRECT_URI:
+        raise HTTPException(status_code=500, detail="Spotify auth is not configured")
+
     scope = "user-read-private user-read-email user-library-read user-read-currently-playing"
     params = {
         "response_type": "code",
@@ -30,9 +44,16 @@ def login():
     return RedirectResponse(auth_url)
 
 @router.get("/callback")
-async def callback(code: str = Query(None), db: Session = Depends(get_db)):
+async def callback(
+    code: Optional[str] = Query(None),
+    error: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    if error:
+        return frontend_redirect(auth_error=error)
+
     if not code:
-        raise HTTPException(status_code=400, detail="Missing code")
+        return frontend_redirect(auth_error="missing_code")
 
     auth_header = base64.b64encode(f"{SPOTIFY_CLIENT_ID}:{SPOTIFY_CLIENT_SECRET}".encode()).decode()
     async with httpx.AsyncClient() as client:
@@ -47,7 +68,7 @@ async def callback(code: str = Query(None), db: Session = Depends(get_db)):
         )
         
         if token_res.status_code != 200:
-            raise HTTPException(status_code=400, detail="Failed to get tokens")
+            return frontend_redirect(auth_error="token_exchange_failed")
             
         tokens = token_res.json()
         access_token = tokens["access_token"]
@@ -59,6 +80,9 @@ async def callback(code: str = Query(None), db: Session = Depends(get_db)):
             "https://api.spotify.com/v1/me",
             headers={"Authorization": f"Bearer {access_token}"},
         )
+        if user_res.status_code != 200:
+            return frontend_redirect(auth_error="spotify_profile_failed")
+
         user_data = user_res.json()
         spotify_id = user_data["id"]
 
@@ -74,7 +98,16 @@ async def callback(code: str = Query(None), db: Session = Depends(get_db)):
         db.commit()
         db.refresh(user)
 
-    return {"message": "Authenticated successfully", "spotify_id": spotify_id}
+    response = frontend_redirect(auth="spotify", user_id=user.id)
+    response.set_cookie(
+        key="music_memo_user_id",
+        value=str(user.id),
+        max_age=60 * 60 * 24 * 365,
+        httponly=False,
+        secure=FRONTEND_ORIGIN.startswith("https://"),
+        samesite="lax",
+    )
+    return response
 
 @router.get("/me")
 async def get_me(user_id: int, db: Session = Depends(get_db)):

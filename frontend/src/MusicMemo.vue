@@ -14,9 +14,16 @@
           <h2 class="track-name">{{ currentTrack.track_name }}</h2>
           <p class="artist-name">{{ currentTrack.artist_name }}</p>
         </div>
+        <div v-else-if="authRequired" class="loading-state">
+          <p>Connect Spotify to start.</p>
+          <p v-if="authMessage" class="auth-message">{{ authMessage }}</p>
+          <button @click="loginWithSpotify" class="spotify-btn">Connect Spotify</button>
+        </div>
         <div v-else class="loading-state">
-          <p>Nothin' spinning right now...</p>
-          <button @click="fetchCurrentTrack" class="btn-text">Refresh</button>
+          <p>{{ trackMessage }}</p>
+          <button @click="fetchCurrentTrack" class="btn-text" :disabled="isLoadingTrack">
+            {{ isLoadingTrack ? 'Checking...' : 'Refresh' }}
+          </button>
         </div>
       </section>
 
@@ -61,16 +68,23 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
 
 // State
 const currentTrack = ref(null);
 const selectedMood = ref(null);
 const note = ref('');
 const isSaving = ref(false);
+const isLoadingTrack = ref(false);
+const authRequired = ref(false);
+const authMessage = ref('');
+const trackMessage = ref("Nothin' spinning right now...");
+const userId = ref(null);
+let pollTimer = null;
+
 const isPlaying = computed(() => !!currentTrack.value?.track_id);
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
-const userId = Number(import.meta.env.VITE_USER_ID || 1);
+const configuredUserId = Number(import.meta.env.VITE_USER_ID || 0);
 
 const moods = [
   { emoji: '🔥', label: 'Hype' },
@@ -81,27 +95,121 @@ const moods = [
   { emoji: '🌪️', label: 'Vibe' },
 ];
 
-const canSave = computed(() => currentTrack.value && selectedMood.value);
+const canSave = computed(() => currentTrack.value && selectedMood.value && userId.value);
 
 // API Calls
 const apiUrl = (path) => `${apiBaseUrl}${path.startsWith('/') ? path : `/${path}`}`;
 
+const parseUserId = (value) => {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+};
+
+const getCookie = (name) => {
+  const cookie = document.cookie
+    .split('; ')
+    .find((item) => item.startsWith(`${name}=`));
+
+  return cookie ? decodeURIComponent(cookie.split('=').slice(1).join('=')) : null;
+};
+
+const rememberUserId = (value) => {
+  userId.value = value;
+  localStorage.setItem('music_memo_user_id', String(value));
+};
+
+const loadStoredUserId = () => (
+  parseUserId(localStorage.getItem('music_memo_user_id')) ||
+  parseUserId(getCookie('music_memo_user_id')) ||
+  parseUserId(configuredUserId)
+);
+
+const readAuthCallbackParams = () => {
+  const params = new URLSearchParams(window.location.search);
+  const callbackUserId = parseUserId(params.get('user_id'));
+  const authError = params.get('auth_error');
+  let shouldCleanUrl = false;
+
+  if (callbackUserId) {
+    rememberUserId(callbackUserId);
+    authRequired.value = false;
+    authMessage.value = '';
+    params.delete('user_id');
+    params.delete('auth');
+    shouldCleanUrl = true;
+  }
+
+  if (authError) {
+    authRequired.value = true;
+    authMessage.value = 'Spotify authorization failed.';
+    params.delete('auth_error');
+    shouldCleanUrl = true;
+  }
+
+  if (shouldCleanUrl) {
+    const query = params.toString();
+    const nextUrl = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`;
+    window.history.replaceState({}, '', nextUrl);
+  }
+};
+
+const loginWithSpotify = () => {
+  window.location.href = apiUrl('/auth/login');
+};
+
 const fetchCurrentTrack = async () => {
+  if (!userId.value) {
+    authRequired.value = true;
+    authMessage.value = '';
+    currentTrack.value = null;
+    return;
+  }
+
+  isLoadingTrack.value = true;
+
   try {
-    const response = await fetch(apiUrl(`/auth/me/current-track?user_id=${userId}`));
+    const response = await fetch(apiUrl(`/auth/me/current-track?user_id=${userId.value}`));
     const data = await response.json();
+
+    if (response.status === 404) {
+      localStorage.removeItem('music_memo_user_id');
+      userId.value = null;
+      authRequired.value = true;
+      authMessage.value = 'Spotify is not connected yet.';
+      currentTrack.value = null;
+      return;
+    }
+
+    if (!response.ok) {
+      throw new Error(data.detail || 'Failed to fetch track');
+    }
+
+    authRequired.value = false;
+    authMessage.value = '';
+
     if (data.track_id) {
       currentTrack.value = data;
     } else {
       currentTrack.value = null;
+      trackMessage.value = data.message || "Nothin' spinning right now...";
     }
   } catch (error) {
+    currentTrack.value = null;
+    trackMessage.value = 'Could not reach Music Memo API.';
     console.error('Failed to fetch track', error);
+  } finally {
+    isLoadingTrack.value = false;
   }
 };
 
 const saveEntry = async () => {
-  if (!canSave.value) return;
+  if (!canSave.value) {
+    if (!userId.value) {
+      authRequired.value = true;
+    }
+    return;
+  }
+
   isSaving.value = true;
   
   try {
@@ -109,7 +217,7 @@ const saveEntry = async () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        user_id: userId,
+        user_id: userId.value,
         track_id: currentTrack.value.track_id,
         track_name: currentTrack.value.track_name,
         artist_name: currentTrack.value.artist_name,
@@ -132,9 +240,20 @@ const saveEntry = async () => {
 };
 
 onMounted(() => {
+  readAuthCallbackParams();
+  userId.value = userId.value || loadStoredUserId();
   fetchCurrentTrack();
-  // Poll every 30 seconds
-  setInterval(fetchCurrentTrack, 30000);
+  pollTimer = setInterval(() => {
+    if (!authRequired.value) {
+      fetchCurrentTrack();
+    }
+  }, 30000);
+});
+
+onUnmounted(() => {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+  }
 });
 </script>
 
@@ -325,5 +444,37 @@ textarea:focus {
   text-decoration: underline;
   padding: 0;
   font-size: 14px;
+}
+
+.btn-text:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.auth-message {
+  font-size: 13px;
+  opacity: 0.65;
+  margin: 8px 0 16px;
+}
+
+.spotify-btn {
+  background: #1ed760;
+  border: none;
+  border-radius: 100px;
+  color: #07130a;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 12px 18px;
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.spotify-btn:hover {
+  background: #32e06f;
+}
+
+.spotify-btn:active {
+  transform: scale(0.97);
 }
 </style>
