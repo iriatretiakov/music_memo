@@ -98,6 +98,9 @@ const trackMessage = ref("Nothin' spinning right now...");
 const userId = ref(null);
 let pollTimer = null;
 
+const ACTIVE_TRACK_POLL_MS = 5000;
+const HIDDEN_TRACK_POLL_MS = 30000;
+
 const isPlaying = computed(() => !!currentTrack.value?.track_id);
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
 const configuredUserId = Number(import.meta.env.VITE_USER_ID || 0);
@@ -223,6 +226,10 @@ const fetchCurrentTrack = async () => {
     return;
   }
 
+  if (isLoadingTrack.value) {
+    return;
+  }
+
   isLoadingTrack.value = true;
 
   try {
@@ -257,6 +264,38 @@ const fetchCurrentTrack = async () => {
     console.error('Failed to fetch track', error);
   } finally {
     isLoadingTrack.value = false;
+  }
+};
+
+const trackPollDelay = () => (
+  document.visibilityState === 'visible' ? ACTIVE_TRACK_POLL_MS : HIDDEN_TRACK_POLL_MS
+);
+
+const clearTrackPoll = () => {
+  if (pollTimer) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+};
+
+const scheduleTrackPoll = () => {
+  clearTrackPoll();
+  pollTimer = setTimeout(runTrackPoll, trackPollDelay());
+};
+
+const runTrackPoll = async () => {
+  if (!authRequired.value) {
+    await fetchCurrentTrack();
+  }
+
+  scheduleTrackPoll();
+};
+
+const handleVisibilityChange = () => {
+  scheduleTrackPoll();
+
+  if (document.visibilityState === 'visible' && !authRequired.value) {
+    fetchCurrentTrack();
   }
 };
 
@@ -302,17 +341,13 @@ onMounted(() => {
   readAuthCallbackParams();
   userId.value = userId.value || loadStoredUserId();
   fetchCurrentTrack();
-  pollTimer = setInterval(() => {
-    if (!authRequired.value) {
-      fetchCurrentTrack();
-    }
-  }, 30000);
+  scheduleTrackPoll();
+  document.addEventListener('visibilitychange', handleVisibilityChange);
 });
 
 onUnmounted(() => {
-  if (pollTimer) {
-    clearInterval(pollTimer);
-  }
+  clearTrackPoll();
+  document.removeEventListener('visibilitychange', handleVisibilityChange);
 });
 </script>
 
